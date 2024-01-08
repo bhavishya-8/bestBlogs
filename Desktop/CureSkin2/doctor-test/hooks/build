@@ -1,0 +1,27 @@
+#!/bin/bash
+# VariableNameFormat: environmentName + "_ENV_FILE"
+ENV_FILE=`(echo "$SOURCE_BRANCH""_ENV_FILE")`
+ENV_FILE="${ENV_FILE//./_}"
+echo "$ENV_FILE"
+echo "${!ENV_FILE}"
+docker build --build-arg encrypted_env="${!ENV_FILE}" --build-arg branch="$SOURCE_BRANCH" -f $DOCKERFILE_PATH -t $IMAGE_NAME .
+
+#!/bin/bash
+# VariableNameFormat: environmentName + "_ENV_FILE"
+ENV_FILE=`(echo "$SOURCE_BRANCH""_ENV_FILE")`
+ENV_FILE="${ENV_FILE//./_}"
+echo "$ENV_FILE"
+echo "${!ENV_FILE}"
+VERSION=$(grep '"version":' package.json | cut -d\" -f4)
+BRANCH_PREFIX="o"
+if [ "$SOURCE_BRANCH" = "production" ];then
+  BRANCH_PREFIX=""
+elif [ "$SOURCE_BRANCH" = "test" ]; then
+  BRANCH_PREFIX="t"
+elif [ "$SOURCE_BRANCH" = "staging.dist" ]; then
+  BRANCH_PREFIX="s"
+fi
+IMAGE_TAG="$DOCKER_REPO:$BRANCH_PREFIX$VERSION"
+
+docker build --build-arg encrypted_env="${!ENV_FILE}" --build-arg branch="$SOURCE_BRANCH" -f "$DOCKERFILE_PATH" -t "$IMAGE_NAME" -t "$IMAGE_TAG" .
+docker push "$IMAGE_TAG"

@@ -1,0 +1,19 @@
+name: Push Production
+run-name: ${{ github.event.number }} 🚀 ${{ github.event.head_commit.message }}
+on:
+  push:
+    branches:
+      - production
+
+jobs:
+  release-notification:
+    runs-on: self-hosted
+    concurrency:
+      group: push-production-release-notification
+      cancel-in-progress: true
+    steps:
+      - name: Released Notification
+        uses: julb/action-post-googlechat-message@v1
+        with:
+          message: Doctor Released on Production. (Will be deployed in 10min).
+          gchat_webhook_url: ${{ secrets.GOOGLE_CHAT_WEBHOOK }}

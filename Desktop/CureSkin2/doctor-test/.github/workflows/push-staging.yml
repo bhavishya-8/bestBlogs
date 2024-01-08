@@ -1,0 +1,59 @@
+name: PR Check
+run-name: ${{ github.event.number }} 🚀 ${{ github.event.head_commit.message }}
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  build-staging:
+    runs-on: self-hosted
+    concurrency:
+      group: push-staging-build-staging
+      cancel-in-progress: true
+    container:
+      image: healloinc/ci-build:latest
+      credentials:
+        username: healloinc
+        password: ${{ secrets.docker_hub_password}}
+    services:
+      cache-http:
+        image: healloinc/cache-http:latest
+        volumes:
+          - /home/ubuntu/github-action-runner/cache:/app/assets
+    outputs:
+      status: ${{ steps.bulid.outputs.status }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.pat_github}}
+      - name: NPM Install
+        uses: yog27ray/action-http-cache@v1
+        with:
+          version: 16.19.1
+          lock_file: package-lock.json
+          install_command: npm ci
+          destination_folder: node_modules
+          ignore_fields: "version"
+          cache_http_api: "http://cache-http"
+          http_proxy: ""
+      - run: |
+         VERSION=$(cat package.json  | grep version | head -1 | awk -F: '{ print $2 }' | sed 's/[",]//g')
+         sed -i -e 's/serviceWorkerVersion/'$(echo $VERSION | head -c 8)'/g' src/app.sw.js
+         mkdir dist
+         cd dist
+         git config --global init.defaultBranch staging.dist
+         git init
+         git remote add origin "https://$TOKEN:$TOKEN@github.com/$GITHUB_REPOSITORY.git"
+         git fetch origin +refs/heads/staging.dist
+         git checkout staging.dist
+         rm -r *
+         rm -rf .github
+         cd ..
+         npm run build
+         cd dist
+         git add *
+         /ci-build/scripts/github-actions/commit-changes-and-push.sh "${{ github.event.head_commit.message }}"
+        env:
+          TOKEN: ${{ secrets.pat_github}}

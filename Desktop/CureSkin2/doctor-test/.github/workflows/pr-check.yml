@@ -1,0 +1,184 @@
+name: PR Check
+run-name: ${{ github.event.number }} 🚀 ${{ github.event.pull_request.title }} 🚀 ${{ github.event.head_commit.message }}
+on:
+  pull_request:
+    branches:
+      - master
+      - staging
+      - release|*
+jobs:
+  version-check:
+    runs-on: self-hosted
+    concurrency:
+      group: ${{ github.event.number }}-version-check
+      cancel-in-progress: true
+    container:
+      image: healloinc/ci-build:latest
+      credentials:
+        username: healloinc
+        password: ${{ secrets.docker_hub_password}}
+    outputs:
+      status: ${{ steps.version-check.outputs.status }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.pat_github}}
+      - name: version-check
+        id: version-check
+        run: |
+          git config --global --add safe.directory /__w/doctor/doctor
+          /ci-build/scripts/github-actions/npm-version-check.sh
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+
+
+  npm-update:
+    runs-on: self-hosted
+    if: ${{ needs.version-check.outputs.status == 'success' }}
+    needs: [version-check]
+    concurrency:
+      group: ${{ github.event.number }}-npm-update
+      cancel-in-progress: true
+    outputs:
+      status: ${{ steps.package-lock-check.outputs.status }}
+    container:
+      image: healloinc/api-image:latest
+      credentials:
+        username: healloinc
+        password: ${{ secrets.docker_hub_password}}
+    services:
+      cache-http:
+        image: healloinc/cache-http:latest
+        volumes:
+          - /home/ubuntu/github-action-runner/cache:/app/assets
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.pat_github }}
+      - run: chmod -R 777 ./
+      - name: NPM Install
+        uses: yog27ray/action-http-cache@v1
+        with:
+          version: 16.19.1
+          lock_file: package-lock.json
+          install_command: npm ci
+          destination_folder: node_modules
+          ignore_fields: "version"
+          cache_http_api: "http://cache-http"
+          http_proxy: ""
+      - name: package-lock.json check
+        id: package-lock-check
+        run: |
+          md5sum package-lock.json > package-lock.md5
+          npm i
+          # Verify MD5 checksum
+          if md5sum --check "package-lock.md5"; then
+            echo "MD5 checksum verified successfully."
+            rm package-lock.md5;
+            echo "File deleted."
+            echo "status=success" >> $GITHUB_OUTPUT;
+          else
+            echo "MD5 checksum verification failed."
+            echo "Branch Name: $GITHUB_HEAD_REF"
+            git config --global --add safe.directory /__w/doctor/doctor
+            git fetch origin "+refs/heads/$GITHUB_HEAD_REF"
+            git checkout -b "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
+            git config --global user.email "faceapps@heallo.ai"
+            git config --global user.name "faceapps"
+            git add "package-lock.json"
+            git commit -m "package-lock.json update"
+            git push origin "$GITHUB_HEAD_REF"
+            echo "status=failure" >> $GITHUB_OUTPUT;
+          fi
+
+  code-formatting:
+    runs-on: self-hosted
+    if: ${{ needs.npm-update.outputs.status == 'success' }}
+    needs: [npm-update]
+    concurrency:
+      group: ${{ github.event.number }}-code-formatting
+      cancel-in-progress: true
+    container:
+      image: healloinc/ci-build:latest
+      credentials:
+        username: healloinc
+        password: ${{ secrets.docker_hub_password}}
+    services:
+      cache-http:
+        image: healloinc/cache-http:latest
+        volumes:
+          - /home/ubuntu/github-action-runner/cache:/app/assets
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.pat_github}}
+      - run: chmod -R 777 ./
+      - name: NPM Install
+        uses: yog27ray/action-http-cache@v1
+        with:
+          version: 16.19.1
+          lock_file: package-lock.json
+          install_command: npm ci
+          destination_folder: node_modules
+          ignore_fields: "version"
+          cache_http_api: "http://cache-http"
+          http_proxy: ""
+      - run: node_modules/eslint/bin/eslint.js  --ext .ts src
+      - run: node_modules/tslint/bin/tslint -p ./ -c src/tslint.json
+      - run: node_modules/typescript/bin/tsc -p ./
+      - run: rm -r dist
+
+  build:
+    runs-on: self-hosted
+    needs: [code-formatting]
+    concurrency:
+      group: ${{ github.event.number }}-build
+      cancel-in-progress: true
+    container:
+      image: healloinc/ci-build:latest
+      credentials:
+        username: healloinc
+        password: ${{ secrets.docker_hub_password}}
+    services:
+      cache-http:
+        image: healloinc/cache-http:latest
+        volumes:
+          - /home/ubuntu/github-action-runner/cache:/app/assets
+    outputs:
+      status: ${{ steps.bulid.outputs.status }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.pat_github}}
+      - name: NPM Install
+        uses: yog27ray/action-http-cache@v1
+        with:
+          version: 16.19.1
+          lock_file: package-lock.json
+          install_command: npm ci
+          destination_folder: node_modules
+          ignore_fields: "version"
+          cache_http_api: "http://cache-http"
+          http_proxy: ""
+      - name: Build Website
+        run: npm run build
+
+  test-success:
+    runs-on: self-hosted
+    concurrency:
+      group: ${{ github.event.number }}-test-success
+      cancel-in-progress: true
+    needs: [ build, code-formatting ]
+    container:
+      image: healloinc/ci-build:latest
+      credentials:
+        username: healloinc
+        password: ${{ secrets.docker_hub_password}}
+    steps:
+      - name: All Test Passed
+        run: echo "All Test Passed"

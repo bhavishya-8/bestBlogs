@@ -1,0 +1,19 @@
+name: Push Staging.Dist
+run-name: ${{ github.event.number }} 🚀 ${{ github.event.head_commit.message }}
+on:
+  push:
+    branches:
+      - staging.dist
+
+jobs:
+  release-notification:
+    runs-on: self-hosted
+    concurrency:
+      group: push-staging.dist-release-notification
+      cancel-in-progress: true
+    steps:
+      - name: Released Notification
+        uses: julb/action-post-googlechat-message@v1
+        with:
+          message: Doctor Released on Staging. (Will be deployed in 10min).
+          gchat_webhook_url: ${{ secrets.GOOGLE_CHAT_WEBHOOK }}
